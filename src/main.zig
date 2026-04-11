@@ -126,28 +126,31 @@ pub fn main(init: std.process.Init) !void {
 
     summing_queue.close(io);
 
-    const final_val = future_summing.await(io);
-    std.debug.print("The size of the dir is: {d} bytes\n", .{ final_val });
+    const memory_used, const number_of_files = future_summing.await(io);
+    std.debug.print("The size of the dir is: {d} bytes\n", .{ memory_used });
+    std.debug.print("The number of files found: {d} files\n", .{ number_of_files });
 
 }
 
 
 
-fn summing_thread(io : std.Io, queue : *std.Io.Queue(u64)) u64 {
+fn summing_thread(io : std.Io, queue : *std.Io.Queue(u64)) struct { u64, u64 } {
     var running_sum : u64 = 0;
+    var number_of_files : u64 = 0;
 
     while (queue.getOne(io)) |val| {
         running_sum += val;
+        number_of_files += 1;
     }
     else |err| {
         switch (err) {
-            error.Canceled => return 0,
-            error.Closed => return running_sum,
+            error.Canceled => return .{ 0, 0 },
+            error.Closed => return .{ running_sum, number_of_files },
             else => unreachable,
         }
     }
 
-    return running_sum;
+    return .{ running_sum, number_of_files };
 }
 
 fn stat_thread(
