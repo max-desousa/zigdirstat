@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const dep_zutl = b.dependency("zutl", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const mod_zutl = dep_zutl.module("zutl_all");
+
     const exe = b.addExecutable(.{
         .name = "zigdirstat",
         .root_module = b.createModule(.{
@@ -11,7 +17,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                //.{ .name = "zigdirstat", .module = mod },
+                .{ .name = "zutl", .module = mod_zutl },
             },
         }),
     });
@@ -25,7 +31,5 @@ pub fn build(b: *std.Build) void {
 
     run_cmd.step.dependOn(b.getInstallStep());
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 }
