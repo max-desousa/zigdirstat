@@ -43,40 +43,37 @@ pub fn main() !void {
         arr_list_fs_item.deinit(allocator);
     }
 
-    const cwd = try std.Io.Dir.openDir(.cwd(), io, ".", .{ .iterate = true, .follow_symlinks = false });
-    defer cwd.close(io);
+    const orig_termios = try std.posix.tcgetattr(std.Io.File.stdin().handle);
+    defer {
+        std.posix.tcsetattr(std.Io.File.stdin().handle, .FLUSH, orig_termios) catch {};
+    }
 
-    var cwd_iterator = cwd.iterate();
+    var new_termios = orig_termios;
+    new_termios.lflag.ICANON = false;
+    new_termios.lflag.ECHO = false;
+    try std.posix.tcsetattr(std.Io.File.stdin().handle, .FLUSH, new_termios);
 
-    while (cwd_iterator.next(io)) |nullable_entry| {
-        const entry = nullable_entry orelse break;
-        const size = switch (entry.kind) {
-            .file => blk: {
-                const stat = try std.Io.Dir.statFile(
-                    cwd,
-                    io,
-                    entry.name,
-                    .{ .follow_symlinks = false });
-                break :blk stat.size;
-            },
-            .directory => try zutl.Dir.get_directory_size(
-                io,
-                allocator,
-                entry.name),
+    var buffer_stdin : [64]u8 = undefined;
+    var buffer_stdout : [1024] u8 = undefined;
+
+    var writer_stdout : std.Io.File.Writer = .init(.stdout(), io, &buffer_stdout);
+    var reader_stdout : std.Io.File.Reader = .init(.stdin(), io, &buffer_stdin);
+
+    while(true) {
+        const char = try reader_stdout.interface.takeByte();
+        switch (char) {
+            'h' => std.debug.print("Left pressed\n", .{}),
+            'j' => std.debug.print("Down pressed\n", .{}),
+            'k' => std.debug.print("Up pressed\n", .{}),
+            'l' => std.debug.print("Right pressed\n", .{}),
+            'q' => break,
             else => continue,
-        };
-        try arr_list_fs_item.append(
-            allocator,
-            .{
-                .kind = entry.kind,
-                .size = size,
-                .name = try allocator.dupe(u8, entry.name),
-            });
+        }
     }
-    else |err| {
-        std.log.err("There was an error iterating through the directory: {any}", .{ err });
-        return err;
-    }
+    _ = &writer_stdout;
+
+    try collect_file_information(io, allocator, &arr_list_fs_item);
+
 
     std.mem.sort(fs_item, arr_list_fs_item.items, {}, fs_lt_comp);
 
@@ -124,3 +121,44 @@ fn display(
     try writer_stdout.interface.flush();
 }
 
+
+fn collect_file_information(
+    io : std.Io,
+    allocator : std.mem.Allocator,
+    arr_list : *std.ArrayList(fs_item),
+) !void {
+    const cwd = try std.Io.Dir.openDir(.cwd(), io, ".", .{ .iterate = true, .follow_symlinks = false });
+    defer cwd.close(io);
+
+    var cwd_iterator = cwd.iterate();
+
+    while (cwd_iterator.next(io)) |nullable_entry| {
+        const entry = nullable_entry orelse break;
+        const size = switch (entry.kind) {
+            .file => blk: {
+                const stat = try std.Io.Dir.statFile(
+                    cwd,
+                    io,
+                    entry.name,
+                    .{ .follow_symlinks = false });
+                break :blk stat.size;
+            },
+            .directory => try zutl.Dir.get_directory_size(
+                io,
+                allocator,
+                entry.name),
+            else => continue,
+        };
+        try arr_list.append(
+            allocator,
+            .{
+                .kind = entry.kind,
+                .size = size,
+                .name = try allocator.dupe(u8, entry.name),
+            });
+    }
+    else |err| {
+        std.log.err("There was an error iterating through the directory: {any}", .{ err });
+        return err;
+    }
+}
