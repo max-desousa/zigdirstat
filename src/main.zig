@@ -7,6 +7,12 @@ const fs_item = struct {
     kind : std.Io.File.Kind,
 };
 
+const DisplayPage = struct {
+    entry_list : *std.ArrayList(fs_item),
+    current_item : usize,
+    max_item : usize,
+};
+
 fn fs_lt_comp(
     _ : void,
     a : fs_item,
@@ -59,15 +65,23 @@ pub fn main() !void {
     var writer_stdout : std.Io.File.Writer = .init(.stdout(), io, &buffer_stdout);
     var reader_stdout : std.Io.File.Reader = .init(.stdin(), io, &buffer_stdin);
 
+    var var_display : DisplayPage = .{
+        .entry_list = &arr_list_fs_item,
+        .current_item = 0,
+        .max_item = 0,
+    };
+
     while(true) {
         const char = try reader_stdout.interface.takeByte();
-        switch (char) {
-            'h' => std.debug.print("Left pressed\n", .{}),
-            'j' => std.debug.print("Down pressed\n", .{}),
-            'k' => std.debug.print("Up pressed\n", .{}),
-            'l' => std.debug.print("Right pressed\n", .{}),
+        const update_display = switch (char) {
+            'j' => increment_display(&var_display),
+            'k' => decrement_display(&var_display),
             'q' => break,
             else => continue,
+        };
+
+        if (update_display) {
+            update_the_display();
         }
     }
     _ = &writer_stdout;
@@ -80,6 +94,22 @@ pub fn main() !void {
     const size = try zutl.Dir.get_directory_size(io, allocator, ".");
 
     try display(io, size, &arr_list_fs_item);
+}
+
+fn increment_display(page : *DisplayPage) bool {
+    if (page.current_item < page.max_item) {
+        page.current_item += 1;
+        return true;
+    }
+    return false;
+}
+
+fn decrement_display(page : *DisplayPage) bool {
+    if (page.current_item > 0) {
+        page.current_item -= 1;
+        return true;
+    }
+    return false;
 }
 
 
@@ -161,4 +191,7 @@ fn collect_file_information(
         std.log.err("There was an error iterating through the directory: {any}", .{ err });
         return err;
     }
+}
+
+fn update_the_display() void {
 }
