@@ -80,6 +80,7 @@ pub fn main() !void {
         const update_display = switch (char) {
             'j' => increment_display(&page_to_display),
             'k' => decrement_display(&page_to_display),
+            '\r', '\n' => try handle_enter(io, allocator, &page_to_display),
             'q' => break,
             else => continue,
         };
@@ -102,8 +103,47 @@ pub fn main() !void {
     //try old_display_function_to_delete(io, size, &arr_list_fs_item);
 }
 
+fn handle_enter(
+    io : std.Io,
+    allocator : std.mem.Allocator,
+    display_page : *DisplayPage,
+) !bool {
+    if (1 == display_page.current_item) {
+        // Do nothing... user is trying to refresh current view.
+        return false;
+    }
+
+    var buffer_for_new_path : [std.fs.max_path_bytes]u8 = undefined;
+
+    const new_path = blk: {
+        if (0 == display_page.current_item) {
+            const path = display_page.current_rel_path orelse return error.NullPath;
+            const index = std.mem.lastIndexOfScalar(u8, path, std.fs.path.sep) orelse return false;
+            break :blk path[0..index];
+        }
+        else {
+            break :blk try std.fmt.bufPrint(
+                &buffer_for_new_path,
+                "{s}{c}{s}",
+                .{
+                    display_page.current_rel_path.?,
+                    std.fs.path.sep,
+                    display_page.entry_list.items[display_page.current_item - 2].name
+                });
+        }
+    };
+
+    try generate_display(
+        io,
+        allocator,
+        display_page,
+        new_path);
+
+    return true;
+}
+
 fn increment_display(page : *DisplayPage) bool {
-    if (page.current_item < page.max_item) {
+    if (page.current_item < (page.max_item - 1)) {
         page.current_item += 1;
         return true;
     }
@@ -164,7 +204,8 @@ fn collect_file_information(
     display : *DisplayPage,
     //arr_list : *std.ArrayList(FileSystemEntry),
 ) !void {
-    const cwd = try std.Io.Dir.openDir(.cwd(), io, ".", .{ .iterate = true, .follow_symlinks = false });
+    const path = display.current_rel_path orelse ".";
+    const cwd = try std.Io.Dir.openDir(.cwd(), io, path, .{ .iterate = true, .follow_symlinks = false });
     defer cwd.close(io);
 
     var cwd_iterator = cwd.iterate();
@@ -207,6 +248,9 @@ fn update_the_display(
     stdout : *std.Io.File.Writer,
     display_page : *DisplayPage,
 ) !void {
+    try stdout.interface.print("\x1b[2J\x1b[H", .{});
+    //try stdout.interface.flush();
+
     const max_name_size = blk: {
         var longest_name : usize = 0;
 
@@ -219,8 +263,35 @@ fn update_the_display(
         break :blk longest_name + 1;
     };
 
-    for (display_page.entry_list.items) |entry| {
-        try stdout.interface.print("{s}", .{ entry.name });
+    if (display_page.current_item == 0) {
+        try stdout.interface.print("- \x1b[34m../\x1b[0m\n", .{});
+    }
+    else {
+        try stdout.interface.print("  \x1b[34m../\x1b[0m\n", .{});
+    }
+
+    if (display_page.current_item == 1) {
+        try stdout.interface.print("- \x1b[34m./\x1b[0m\n", .{});
+    }
+    else {
+        try stdout.interface.print("  \x1b[34m./\x1b[0m\n", .{});
+    }
+
+    for (display_page.entry_list.items, 2..) |entry, i| {
+        const color_str_start, const color_str_end = blk: {
+            if (.directory == entry.kind) {
+                break :blk .{ "\x1b[34m", "\x1b[0m"};
+            }
+            else {
+                break :blk .{ "", ""};
+            }
+        };
+        if (display_page.current_item == i) {
+            try stdout.interface.print("- {s}{s}{s}", .{ color_str_start, entry.name, color_str_end });
+        }
+        else {
+            try stdout.interface.print("  {s}{s}{s}", .{ color_str_start, entry.name, color_str_end });
+        }
         const spaces_to_write = max_name_size - entry.name.len;
         for (0..spaces_to_write) |_| {
             _ = try stdout.interface.write(" ");
@@ -230,9 +301,6 @@ fn update_the_display(
 
         try stdout.interface.print("- {d:.4}% ({d} bytes)\n", .{ percent, entry.size });
     }
-
-    try stdout.interface.print("Current position: {d}\n", .{ display_page.current_item });
-    try stdout.interface.print("Number of dirs: {d}\n", .{ display_page.max_item });
 
     try stdout.interface.flush();
 }
@@ -259,6 +327,7 @@ fn generate_display(
     display : *DisplayPage,
     new_path : []const u8,
 ) !void {
+    std.log.debug("Just regenerated backing data for display...", .{});
     //First step is to clear the array list of entries if updating.
     for (display.entry_list.items) |item| {
         allocator.free(item.name);
@@ -287,4 +356,6 @@ fn generate_display(
         }
         break :blk num;
     };
+
+    std.log.debug("New max number of items is: {d}", .{ display.max_item });
 }
