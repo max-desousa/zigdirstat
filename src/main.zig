@@ -115,9 +115,9 @@ fn handle_enter(
 
     var buffer_for_new_path : [std.fs.max_path_bytes]u8 = undefined;
 
+    const path = display_page.current_rel_path orelse return error.NullPath;
     const new_path = blk: {
         if (0 == display_page.current_item) {
-            const path = display_page.current_rel_path orelse return error.NullPath;
             const index = std.mem.lastIndexOfScalar(u8, path, std.fs.path.sep) orelse return false;
             break :blk path[0..index];
         }
@@ -133,11 +133,17 @@ fn handle_enter(
         }
     };
 
-    try generate_display(
+    std.log.debug("Value of var \"new_path\" is: {s}", .{ new_path });
+
+    generate_display(
         io,
         allocator,
         display_page,
-        new_path);
+        new_path) catch |err| {
+        std.log.err("Aborting due to error: {any}", .{ err });
+        std.log.debug("Value of \"new_path\" is {s}", .{ new_path });
+        return err;
+    };
 
     return true;
 }
@@ -327,6 +333,8 @@ fn generate_display(
     display : *DisplayPage,
     new_path : []const u8,
 ) !void {
+    const allocated_new_path = try allocator.dupe(u8, new_path);
+
     std.log.debug("Just regenerated backing data for display...", .{});
     //First step is to clear the array list of entries if updating.
     for (display.entry_list.items) |item| {
@@ -340,8 +348,9 @@ fn generate_display(
     display.total_size = 0;
     // End clearing arraylist
     
+    std.log.debug("Value of argument \"new_path\" is: {s}", .{ allocated_new_path });
 
-    display.current_rel_path = try allocator.dupe(u8, new_path);
+    display.current_rel_path = allocated_new_path;
     display.current_item = 1;
 
     try collect_file_information(
