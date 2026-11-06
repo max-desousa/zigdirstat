@@ -32,4 +32,33 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
 
     run_cmd.addPassthruArgs();
+
+    const installDir_docs = b.addInstallDirectory(.{
+        .source_dir = exe.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    const step_docs = b.step("docs", "Generate HTML documentation from the doc comments");
+    step_docs.dependOn(&installDir_docs.step);
+    step_docs.dependOn(b.getInstallStep());
+
+    const step_publish = b.step("publish", "Copys the production version of this binay (size optimized unless otherwise stated) to `~/.local/bin`");
+    const exe_publish = b.addExecutable(.{
+        .name = "zds", 
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = blk: {
+                switch (optimize) {
+                    .debug, .small => break :blk .small,
+                    .fast => break :blk .fast,
+                    .safe => break :blk .safe,
+                    else => unreachable,
+                }
+            },
+            .imports = &.{
+                .{ .name = "zutl", .module = mod_zutl },
+            },
+        })
+    });
+    b.addInstallArtifact(exe_publish, .{})
 }

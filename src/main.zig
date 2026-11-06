@@ -1,3 +1,4 @@
+//! This is a file to have a simple terminal and text based alternative to windirstat program.
 const std = @import("std");
 const zutl = @import("zutl");
 
@@ -27,7 +28,7 @@ fn fs_lt_comp(
     }
     else {
         // These are reversed so items with the highest memory are first in the list.
-        if (a.size < b.size) return false;
+        if (a.size <= b.size) return false;
         return true;
     }
 }
@@ -82,6 +83,10 @@ pub fn main() !void {
             'k' => decrement_display(&page_to_display),
             '\r', '\n' => try handle_enter(io, allocator, &page_to_display),
             'q' => break,
+            '-' => blk: {
+                page_to_display.current_item = 0;
+                break :blk try handle_enter(io, allocator, &page_to_display);
+            },
             else => continue,
         };
 
@@ -133,8 +138,7 @@ fn handle_enter(
         }
     };
 
-    std.log.debug("Value of var \"new_path\" is: {s}", .{ new_path });
-
+    
     generate_display(
         io,
         allocator,
@@ -218,7 +222,7 @@ fn collect_file_information(
 
     while (cwd_iterator.next(io)) |nullable_entry| {
         const entry = nullable_entry orelse break;
-        const size = switch (entry.kind) {
+                const size = switch (entry.kind) {
             .file => blk: {
                 const stat = try std.Io.Dir.statFile(
                     cwd,
@@ -227,10 +231,22 @@ fn collect_file_information(
                     .{ .follow_symlinks = false });
                 break :blk stat.size;
             },
-            .directory => try zutl.Dir.get_directory_size(
-                io,
-                allocator,
-                entry.name),
+            .directory => blk: {
+                var buffer_new_path : [std.fs.max_path_bytes]u8 = undefined;
+                const new_path = try std.fmt.bufPrint(
+                    &buffer_new_path,
+                    "{s}{c}{s}",
+                    .{
+                        path,
+                        std.fs.path.sep,
+                        entry.name,
+                    });
+                
+                break :blk try zutl.Dir.get_directory_size(
+                    io,
+                    allocator,
+                    new_path);
+            },
             else => continue,
         };
         try display.entry_list.append(
@@ -327,7 +343,7 @@ fn generate_initial_display(
     return display;
 }
 
-fn generate_display(
+pub fn generate_display(
     io : std.Io,
     allocator : std.mem.Allocator,
     display : *DisplayPage,
@@ -335,7 +351,6 @@ fn generate_display(
 ) !void {
     const allocated_new_path = try allocator.dupe(u8, new_path);
 
-    std.log.debug("Just regenerated backing data for display...", .{});
     //First step is to clear the array list of entries if updating.
     for (display.entry_list.items) |item| {
         allocator.free(item.name);
@@ -348,8 +363,6 @@ fn generate_display(
     display.total_size = 0;
     // End clearing arraylist
     
-    std.log.debug("Value of argument \"new_path\" is: {s}", .{ allocated_new_path });
-
     display.current_rel_path = allocated_new_path;
     display.current_item = 1;
 
@@ -365,6 +378,4 @@ fn generate_display(
         }
         break :blk num;
     };
-
-    std.log.debug("New max number of items is: {d}", .{ display.max_item });
 }
